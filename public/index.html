@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="fr" data-bs-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <title>OntoViz Pro</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        :root { --accent: #e67e22; }
+        body { height: 100vh; display: flex; overflow: hidden; margin: 0; font-family: 'Segoe UI', sans-serif;}
+        .sidebar { width: 350px; border-right: 1px solid #dee2e6; padding: 20px; overflow-y: auto; background: var(--bs-body-bg); transition: width 0.3s; z-index: 100;}
+        .main-content { flex-grow: 1; display: flex; flex-direction: column; background: var(--bs-tertiary-bg); }
+        
+        .split-container { display: flex; width: 100%; height: 100%; position: relative; }
+        .split-pane { overflow: hidden; position: relative; background: var(--bs-body-bg); }
+        #resizer { width: 10px; cursor: col-resize; background: #dee2e6; display: flex; align-items: center; justify-content: center; transition: background 0.2s; }
+        #resizer:hover { background: var(--accent); }
+        #resizer::after { content: "||"; color: #999; font-size: 10px; }
+
+        .pane-title { position: absolute; top: 10px; left: 10px; z-index: 5; font-size: 0.8rem; font-weight: bold; opacity: 0.7; }
+        .floating-tools { position: absolute; bottom: 20px; right: 20px; z-index: 100; display: flex; gap: 10px; }
+        
+        /* Highlight Global */
+        .highlight-node circle, .highlight-node rect, path.highlight-node { fill: #f1c40f !important; stroke: #e67e22 !important; stroke-width: 4px !important; fill-opacity: 1 !important; }
+        .highlight-node text { fill: #d35400 !important; font-weight: 900 !important; font-size: 14px !important; }
+        .text-hidden text { display: none !important; }
+    </style>
+</head>
+<body>
+
+<div class="sidebar shadow-sm">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h4 class="m-0 text-primary fw-bold">OntoViz</h4>
+        <button class="btn btn-sm btn-outline-secondary" id="darkModeToggle">🌙</button>
+    </div>
+
+    <label class="form-label fw-bold small text-uppercase">1. Fichiers Récents</label>
+    <select id="sessionHistory" class="form-select form-select-sm mb-3">
+        <option value="">Aucun fichier en session</option>
+    </select>
+
+    <label class="form-label fw-bold small text-uppercase">2. Charger Nouveau</label>
+    <input type="file" id="fileInput" class="form-control form-control-sm mb-3" accept=".rdf,.owl,.xml,.rdfs">
+
+    <div class="card p-2 mb-3 bg-light border-0 shadow-sm">
+        <label class="fw-bold small text-uppercase mb-2">3. Vues Actives</label>
+        <div class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" id="showConcepts" checked>
+            <label class="form-check-label small">Concepts</label>
+        </div>
+        <div class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" id="showProperties" checked>
+            <label class="form-check-label small">Propriétés</label>
+        </div>
+    </div>
+
+    <label class="form-label fw-bold small text-uppercase">4. Filtrer Propriétés</label>
+    <div class="d-flex gap-2 mb-3">
+        <div class="btn-group btn-group-sm w-100">
+            <input type="checkbox" class="btn-check" id="filterObj" checked>
+            <label class="btn btn-outline-warning" for="filterObj">Object</label>
+            <input type="checkbox" class="btn-check" id="filterData" checked>
+            <label class="btn btn-outline-info" for="filterData">Data</label>
+        </div>
+    </div>
+
+    <hr>
+    <label class="form-label fw-bold small text-uppercase text-danger">Concept C (Racine)</label>
+    <select id="conceptSelector" class="form-select form-select-sm mb-3 border-danger"></select>
+    
+    <div id="propPanel" class="small p-2 border rounded bg-white text-dark mb-3" style="max-height: 150px; overflow: auto;">
+        <em class="text-muted">Propriétés du concept...</em>
+    </div>
+
+    <label class="form-label fw-bold small text-uppercase">Rechercher</label>
+    <input type="text" id="searchInput" class="form-control form-control-sm mb-2" placeholder="Surligner un noeud...">
+    
+    <div class="form-check form-switch mt-2">
+        <input class="form-check-input" type="checkbox" id="toggleLabels" checked>
+        <label class="form-check-label small">Afficher textes</label>
+    </div>
+</div>
+
+<div class="main-content">
+    <ul class="nav nav-tabs px-3 pt-2" id="vizTabs">
+        <li class="nav-item"><button class="nav-link active" data-type="tree">Arbre & Flèches</button></li>
+        <li class="nav-item"><button class="nav-link" data-type="circle">Circle Packing</button></li>
+        <li class="nav-item"><button class="nav-link" data-type="sunburst">Sunburst Radial</button></li>
+    </ul>
+    
+    <div id="viz-container" class="flex-grow-1 position-relative"></div>
+</div>
+
+<div class="floating-tools">
+    <button class="btn btn-dark btn-sm shadow" id="btnExport">💾 SVG</button>
+</div>
+
+<div id="tooltip" class="position-absolute p-2 bg-dark text-white rounded small opacity-0" style="pointer-events: none; z-index: 2000; box-shadow: 0 2px 10px rgba(0,0,0,0.2);"></div>
+
+<script src="js/tree.js"></script>
+<script src="js/circle.js"></script>
+<script src="js/sunburst.js"></script>
+
+<script>
+    let globalData = null;
+    let currentViz = 'tree';
+    window.activeConcept = "Top"; 
+    window.activeProp = "Propriétés";
+    window.currentSearchTerm = "";
+
+    // Tooltip
+    const tooltip = d3.select("#tooltip");
+    window.showTooltip = (event, text) => { tooltip.html(text).style("opacity", 1).style("left", (event.pageX + 15)+"px").style("top", (event.pageY - 25)+"px"); }
+    window.moveTooltip = (event) => { tooltip.style("left", (event.pageX + 15)+"px").style("top", (event.pageY - 25)+"px"); }
+    window.hideTooltip = () => { tooltip.style("opacity", 0); }
+
+    // Session History
+    function loadHistory() {
+        fetch('../index.php?history=1').then(r => r.json()).then(h => {
+            const sel = document.getElementById('sessionHistory');
+            sel.innerHTML = '<option value="">Fichiers récents...</option>';
+            Object.keys(h).forEach(name => sel.innerHTML += `<option value="${name}">${name}</option>`);
+            window.fullHistory = h;
+        });
+    }
+    loadHistory();
+
+    document.getElementById('sessionHistory').addEventListener('change', function() {
+        if (this.value) { 
+            globalData = window.fullHistory[this.value]; 
+            populateSelector(globalData.hierarchy);
+            updateVisualization(); 
+        }
+    });
+
+    document.getElementById('fileInput').addEventListener('change', function(e) {
+        if (!e.target.files.length) return;
+        const formData = new FormData(); formData.append('file', e.target.files[0]);
+        
+        fetch('../index.php', { method: 'POST', body: formData })
+            .then(res => res.json())
+            .then(data => {
+                if (data.error) throw new Error(data.error);
+                globalData = data; 
+                populateSelector(data.hierarchy);
+                updateVisualization();
+                loadHistory(); // Rafraîchir liste
+            }).catch(err => alert("Erreur : " + err.message));
+    });
+
+    // Dark Mode
+    document.getElementById('darkModeToggle').addEventListener('click', () => {
+        const theme = document.documentElement.getAttribute('data-bs-theme') === 'dark' ? 'light' : 'dark';
+        document.documentElement.setAttribute('data-bs-theme', theme);
+    });
+
+    function populateSelector(hierarchy) {
+        const select = document.getElementById('conceptSelector');
+        select.innerHTML = '<option value="Top">Racine (Vue globale)</option>';
+        let concepts = [];
+        function getNames(node) {
+            if (node.name !== "Top") concepts.push(node.name);
+            if (node.children) node.children.forEach(getNames);
+        }
+        getNames(hierarchy);
+        concepts.sort().forEach(c => select.innerHTML += `<option value="${c}">${c}</option>`);
+    }
+
+    document.getElementById('conceptSelector').addEventListener('change', updateVisualization);
+
+    function findSubTree(node, targetName) {
+        if (node.name === targetName) return node;
+        if (node.children) {
+            for (let child of node.children) {
+                let res = findSubTree(child, targetName);
+                if (res) return res;
+            }
+        }
+        return null;
+    }
+
+    // Split View Generator
+    function createSplitView() {
+        const showC = document.getElementById('showConcepts').checked;
+        const showP = document.getElementById('showProperties').checked;
+        const container = d3.select("#viz-container");
+        container.html("");
+
+        if (showC && showP) {
+            const split = container.append("div").attr("class", "split-container");
+            split.append("div").attr("id", "pane-c").attr("class", "split-pane").style("flex", "1").append("div").attr("class", "pane-title text-primary").text("CONCEPTS");
+            split.append("div").attr("id", "resizer");
+            split.append("div").attr("id", "pane-p").attr("class", "split-pane").style("flex", "1").append("div").attr("class", "pane-title text-warning").text("PROPRIÉTÉS");
+            
+            const resizer = document.getElementById('resizer');
+            const left = document.getElementById('pane-c');
+            resizer.onmousedown = (e) => {
+                document.onmousemove = (e) => {
+                    const delta = e.clientX - resizer.getBoundingClientRect().left;
+                    left.style.flex = `0 0 ${left.offsetWidth + delta}px`;
+                };
+                document.onmouseup = () => document.onmousemove = null;
+            };
+        } else if (showC) {
+            container.append("div").attr("id", "pane-c").attr("class", "h-100 w-100 position-relative").append("div").attr("class", "pane-title text-primary").text("CONCEPTS");
+        } else if (showP) {
+            container.append("div").attr("id", "pane-p").attr("class", "h-100 w-100 position-relative").append("div").attr("class", "pane-title text-warning").text("PROPRIÉTÉS");
+        }
+    }
+
+    // Filtrer les propriétés selon Object/Data
+    function filterProperties(propHierarchy, propertiesList) {
+        const allowObj = document.getElementById('filterObj').checked;
+        const allowData = document.getElementById('filterData').checked;
+
+        // Filtrer la liste des relations (flèches)
+        const filteredList = propertiesList.filter(p => {
+            if (p.type === 'object' && allowObj) return true;
+            if (p.type === 'datatype' && allowData) return true;
+            if (!p.type) return true; // Tolérance si non défini
+            return false;
+        });
+
+        // Fonction pour filtrer l'arbre (propHierarchy)
+        function filterTree(node) {
+            let newNode = { ...node };
+            if (newNode.children) {
+                newNode.children = newNode.children.map(filterTree).filter(n => {
+                    if (n.type === 'object' && !allowObj) return false;
+                    if (n.type === 'datatype' && !allowData) return false;
+                    return true;
+                });
+                if (newNode.children.length === 0) delete newNode.children;
+            }
+            return newNode;
+        }
+
+        return { list: filteredList, tree: filterTree(propHierarchy) };
+    }
+
+    function updateVisualization() {
+        if (!globalData) return;
+        createSplitView();
+        
+        const conceptC = document.getElementById('conceptSelector').value || "Top";
+        const filteredHierarchy = findSubTree(globalData.hierarchy, conceptC) || globalData.hierarchy;
+        
+        const filteredProps = filterProperties(globalData.propHierarchy, globalData.properties);
+        updatePropPanel(conceptC, filteredProps.list);
+
+        if (currentViz === 'tree') drawTree(filteredHierarchy, filteredProps.tree, filteredProps.list);
+        if (currentViz === 'circle') drawCircle(filteredHierarchy, filteredProps.tree);
+        if (currentViz === 'sunburst') drawSunburst(filteredHierarchy, filteredProps.tree);
+        
+        window.applyDisplayOptions();
+        setTimeout(window.applySearch, 100); 
+    }
+
+    function updatePropPanel(concept, properties) {
+        const panel = document.getElementById('propPanel');
+        if (!properties || properties.length === 0) { panel.innerHTML = "Aucune propriété active."; return; }
+        
+        let html = "<strong>Sortantes (Domaine) :</strong><ul class='mb-2 ps-3'>";
+        properties.filter(p => p.source === concept).forEach(p => html += `<li><span class="text-danger">${p.name}</span> ➔ ${p.target}</li>`);
+        html += "</ul><strong>Entrantes (Range) :</strong><ul class='mb-0 ps-3'>";
+        properties.filter(p => p.target === concept).forEach(p => html += `<li>${p.source} ➔ <span class="text-danger">${p.name}</span></li>`);
+        html += "</ul>";
+        panel.innerHTML = html.includes("<li>") ? html : "<em>Aucune propriété liée.</em>";
+    }
+
+    document.querySelectorAll('#vizTabs .nav-link').forEach(btn => {
+        btn.addEventListener('click', function() {
+            document.querySelector('#vizTabs .active').classList.remove('active');
+            this.classList.add('active');
+            currentViz = this.getAttribute('data-type');
+            updateVisualization();
+        });
+    });
+
+    document.getElementById('showConcepts').onchange = updateVisualization;
+    document.getElementById('showProperties').onchange = updateVisualization;
+    document.getElementById('filterObj').onchange = updateVisualization;
+    document.getElementById('filterData').onchange = updateVisualization;
+
+    // Export SVG
+    document.getElementById('btnExport').addEventListener('click', function() {
+        const svgElement = document.querySelector('#viz-container svg');
+        if (!svgElement) return alert("Aucun graphique à exporter.");
+        const serializer = new XMLSerializer();
+        let source = serializer.serializeToString(svgElement);
+        if(!source.match(/^<svg[^>]+xmlns="http\:\/\/www\.w3\.org\/2000\/svg"/)) source = source.replace(/^<svg/, '<svg xmlns="http://www.w3.org/2000/svg"');
+        if(!source.match(/^<svg[^>]+"http\:\/\/www\.w3\.org\/1999\/xlink"/)) source = source.replace(/^<svg/, '<svg xmlns:xlink="http://www.w3.org/1999/xlink"');
+        const url = "data:image/svg+xml;charset=utf-8,"+encodeURIComponent(source);
+        const a = document.createElement("a"); a.href = url; a.download = "ontoviz_export.svg"; document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    });
+
+    document.getElementById('searchInput').addEventListener('input', function(e) {
+        window.currentSearchTerm = e.target.value.toLowerCase(); window.applySearch();
+    });
+
+    window.applySearch = function() {
+        d3.selectAll(".searchable-node").classed("highlight-node", false);
+        if(window.currentSearchTerm.length < 2) return;
+        d3.selectAll(".searchable-node").each(function(d) {
+            if (d && d.data && d.data.name && d.data.name.toLowerCase().includes(window.currentSearchTerm)) d3.select(this).classed("highlight-node", true);
+        });
+    };
+
+    window.applyDisplayOptions = function() {
+        if (document.getElementById('toggleLabels').checked) document.getElementById('viz-container').classList.remove('text-hidden');
+        else document.getElementById('viz-container').classList.add('text-hidden');
+    }
+    document.getElementById('toggleLabels').addEventListener('change', window.applyDisplayOptions);
+</script>
+</body>
+</html>
