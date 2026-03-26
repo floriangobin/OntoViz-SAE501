@@ -22,28 +22,33 @@ if (isset($_GET['history'])) {
 
 $graph = new \EasyRdf\Graph();
 
-// --- CHARGEMENT DU FICHIER ---
+// --- CHARGEMENT INTELLIGENT ---
 if (isset($_FILES['file']) && $_FILES['file']['error'] == UPLOAD_ERR_OK) {
     $filename = $_FILES['file']['name'];
     $tmpPath = $_FILES['file']['tmp_name'];
+    $fileContent = file_get_contents($tmpPath);
     
+    // On regarde le premier caractère (en ignorant les espaces)
+    $firstChar = substr(trim($fileContent), 0, 1);
+
     try {
-        // On ne force plus 'rdfxml'. On laisse EasyRdf deviner le format 
-        // en regardant directement le contenu du fichier (plus fiable que l'extension)
-        $graph->parseFile($tmpPath); 
+        if ($firstChar === '{' || $firstChar === '[') {
+            // C'est du JSON ! On force le format jsonld
+            $graph->parse($fileContent, 'jsonld');
+        } else {
+            // C'est (normalement) du XML ou du Turtle
+            $graph->parse($fileContent);
+        }
     } catch (Exception $e) {
-        // Si l'auto-détection échoue, on tente une dernière chance en RDF/XML
+        // Si l'auto-détection échoue encore, on tente le tout pour le tout
         try {
-            $graph->parseFile($tmpPath, 'rdfxml');
+            $graph->parse($fileContent, 'rdfxml');
         } catch (Exception $e2) {
             http_response_code(400);
-            echo json_encode(["error" => "Format de fichier non reconnu ou corrompu."]);
+            echo json_encode(["error" => "Format de contenu illisible : " . $e->getMessage()]);
             exit;
         }
     }
-} else {
-    echo json_encode(["error" => "Aucun fichier reçu."]); 
-    exit;
 }
 
 try {
