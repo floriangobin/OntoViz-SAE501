@@ -134,18 +134,33 @@
     });
 
     document.getElementById('fileInput').addEventListener('change', function(e) {
-        if (!e.target.files.length) return;
-        const formData = new FormData(); formData.append('file', e.target.files[0]);
-        
-        fetch('api.php', { method: 'POST', body: formData })
-            .then(res => res.json())
-            .then(data => {
-                if (data.error) throw new Error(data.error);
-                globalData = data; 
-                populateSelector(data.hierarchy);
-                updateVisualization();
-                loadHistory(); // Rafraîchir liste
-            }).catch(err => alert("Erreur : " + err.message));
+    if (!e.target.files.length) return;
+    const formData = new FormData(); 
+    formData.append('file', e.target.files[0]);
+    
+    fetch('api.php', { method: 'POST', body: formData })
+        .then(res => res.json())
+        .then(data => {
+            if (data.error) throw new Error(data.error);
+            
+            // 1. On met à jour les données globales
+            globalData = data; 
+            
+            // 2. On rafraîchit la liste des fichiers récents (Dropdown)
+            loadHistory(); 
+            
+            // 3. On met à jour le sélecteur de concepts
+            populateSelector(data.hierarchy);
+            
+            // 4. On dessine immédiatement
+            updateVisualization();
+            
+            // 5. On sélectionne visuellement le fichier dans l'historique
+            setTimeout(() => {
+                document.getElementById('sessionHistory').value = data.filename;
+            }, 500);
+
+        }).catch(err => alert("Erreur : " + err.message));
     });
 
     // Dark Mode
