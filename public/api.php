@@ -1,8 +1,8 @@
 <?php
 session_start();
-ini_set('display_errors', 0);
+ini_set('display_errors', 1); // ON AFFICHE L'ERREUR POUR DÉBOGUER
 error_reporting(E_ALL & ~E_DEPRECATED & ~E_USER_DEPRECATED);
-require '../vendor/autoload.php';
+require __DIR__ . '/../vendor/autoload.php'; // CHEMIN ABSOLU SÉCURISÉ
 
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
