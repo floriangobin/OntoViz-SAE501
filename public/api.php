@@ -1,5 +1,8 @@
 <?php
 session_start();
+ini_set('memory_limit', '256M'); // On donne plus de RAM au script
+ini_set('upload_max_filesize', '20M');
+ini_set('post_max_size', '20M');
 ini_set('display_errors', 1); // ON AFFICHE L'ERREUR POUR DÉBOGUER
 error_reporting(E_ALL & ~E_DEPRECATED & ~E_USER_DEPRECATED);
 require __DIR__ . '/../vendor/autoload.php'; // CHEMIN ABSOLU SÉCURISÉ
@@ -120,14 +123,23 @@ try {
         "properties" => $propertiesList
     ];
 
+    // --- NETTOYAGE ET SAUVEGARDE ---
     if (!isset($_SESSION['history'])) $_SESSION['history'] = [];
-    $_SESSION['history'][$filename] = $result;
-    if (count($_SESSION['history']) > 5) array_shift($_SESSION['history']);
+    
+    // On ne garde que les données pures (JSON) pour ne pas saturer la session
+    $_SESSION['history'][$filename] = json_decode(json_encode($result), true);
+
+    // On limite à 3 fichiers au lieu de 5 pour économiser la mémoire sur Alwaysdata
+    if (count($_SESSION['history']) > 3) {
+        array_shift($_SESSION['history']);
+    }
 
     echo json_encode($result, JSON_UNESCAPED_UNICODE);
 
 } catch (Exception $e) {
+    // TRÈS IMPORTANT : On renvoie l'erreur en JSON pour que le JS comprenne
     http_response_code(500);
-    echo json_encode(["error" => $e->getMessage()]);
+    echo json_encode(["error" => "Erreur lors du parsing : " . $e->getMessage()]);
+    exit;
 }
 ?>
